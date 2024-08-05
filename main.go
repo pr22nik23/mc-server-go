@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ type Server struct {
 }
 
 const (
-	// Default Minecraft server port
 	port = ":25565"
 )
 
@@ -33,6 +33,7 @@ func main() {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
+
 		go handleConnection(conn)
 	}
 }
@@ -42,70 +43,105 @@ func handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 	fmt.Println("New connection from", conn.RemoteAddr())
-	for {
-		_, packetID, err := readMetadata(reader)
-		switch {
-		case errors.Is(err, io.EOF):
-			buf := make([]byte, 100)
-			reader.Read(buf)
-			fmt.Println("buff", buf)
-			fmt.Println("EOF", err)
-			return
-		case errors.Is(err, io.ErrUnexpectedEOF):
-			fmt.Println("ErrUnexpectedEOF", err)
-			return
-		}
-		fmt.Println("packet", packetID)
-		if packetID == 0 {
-			protocol_version, _ := binary.ReadUvarint(reader)
-			fmt.Println("protocol", protocol_version)
-			server_aadress, _ := ReadVarString(reader)
-			fmt.Println("server address", server_aadress)
-			buf := make([]byte, 2)
-			_, err := reader.Read(buf)
-			if err != nil {
-				fmt.Println("Err", err)
-			}
-
-			port := binary.ByteOrder.Uint16(binary.BigEndian, buf)
-			fmt.Println("Port", port)
-
-			nextState, err := binary.ReadUvarint(reader)
-			if err != nil {
-				fmt.Println("TEST", err)
-			}
-
-			fmt.Println("Nexct state", nextState)
-
-			if nextState == 2 {
-				handleLogin(reader)
-				username, err := ReadVarString(reader)
-				if err != nil {
-					fmt.Println("Error", err)
-				}
-				fmt.Println("Username", username)
-
-				uuid, err := ReadUUID(reader)
-				if err != nil {
-					fmt.Println("Error", err)
-				}
-				fmt.Println("UUID", uuid)
-
-				sendLoginSuccess(conn, uuid, username)
-				// packet_id, err := binary.ReadUvarint(reader)
-				// if err != nil {
-				// 	fmt.Println("err", err)
-				// }
-
-				// fmt.Println("Newpacked", packet_id)
-			}
-
-		} else if packetID == 122 {
-			fmt.Println("somethign else ")
-		} else {
-			fmt.Println("This isjust a test fir sinetubg ekse:")
-		}
+	// buf := make([]byte, 1024)
+	// reader.Read(buf)
+	// fmt.Println("This is hte one", buf)
+	packetLen, packetID, err := readMetadata(reader)
+	switch {
+	case errors.Is(err, io.EOF):
+		buf := make([]byte, 100)
+		reader.Read(buf)
+		fmt.Println("buff", buf)
+		fmt.Println("EOF", err)
+		return
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		fmt.Println("ErrUnexpectedEOF", err)
+		return
 	}
+	fmt.Printf("Packet Length: %d, PacketID: %d\n", packetLen, packetID)
+	if packetID == 0 {
+		protocol_version, _ := binary.ReadUvarint(reader)
+		fmt.Println("Protocol: ", protocol_version)
+		server_aadress, _ := ReadVarString(reader)
+		fmt.Println("Server Address: ", server_aadress)
+		buf := make([]byte, 2)
+		_, err := reader.Read(buf)
+		if err != nil {
+			fmt.Println("Err", err)
+		}
+
+		port := binary.ByteOrder.Uint16(binary.BigEndian, buf)
+		fmt.Println("Port: ", port)
+
+		nextState, err := binary.ReadUvarint(reader)
+		if err != nil {
+			fmt.Println("Erroorr", err)
+		}
+
+		if nextState == 2 {
+			handleLogin(reader)
+			username, err := ReadVarString(reader)
+			if err != nil {
+				fmt.Println("Error", err)
+			}
+			fmt.Println("Username", username)
+
+			uuid, err := ReadUUID(reader)
+			if err != nil {
+				fmt.Println("Error", err)
+			}
+			fmt.Println("UUID", uuid)
+
+			sendLoginSuccess(conn, uuid, username)
+			handleLogin(reader)
+
+		} else if nextState == 1 {
+			handleLogin(reader)
+
+			SendStatusResponse(conn)
+
+		} else {
+			fmt.Println("Some unknown state")
+			return
+		}
+
+	} else if packetID == 122 {
+		fmt.Println("We are in 122")
+		readReportDetails(reader)
+	} else {
+		fmt.Println("This isjust a test fir sinetubg ekse:")
+	}
+}
+
+func readReportDetails(reader *bufio.Reader) {
+	buf := make([]byte, 255)
+	read, err := reader.Read(buf)
+	if err != nil {
+		fmt.Println("DSADSADSA", err)
+	}
+	fmt.Println("Read bytes", read)
+	fmt.Println(buf)
+	fmt.Println(string(buf))
+	count, err := binary.ReadVarint(reader)
+	if err != nil {
+		fmt.Println("Read Error", err)
+	}
+
+	fmt.Println("Count", count)
+	for i := 0; int64(i) < count; i++ {
+		fmt.Println("I", i)
+		title, err := ReadVarString(reader)
+		if err != nil {
+			fmt.Println("String error", err)
+		}
+		description, err := ReadVarString(reader)
+		if err != nil {
+			fmt.Println("String error", err)
+		}
+
+		fmt.Println("Title -", title, "Description -", description)
+	}
+
 }
 
 func readMetadata(reader *bufio.Reader) (uint64, uint64, error) {
@@ -122,7 +158,6 @@ func readMetadata(reader *bufio.Reader) (uint64, uint64, error) {
 }
 
 func handleLogin(reader *bufio.Reader) {
-
 	length, err := binary.ReadUvarint(reader)
 	if err != nil {
 		fmt.Println(err)
@@ -139,19 +174,28 @@ func handleLogin(reader *bufio.Reader) {
 }
 
 func sendLoginSuccess(conn net.Conn, uuid string, username string) {
-	fmt.Println([]byte(uuid))
 	writer := bufio.NewWriter(conn)
-	buf := make([]byte, binary.MaxVarintLen64)
-	_ = binary.PutVarint(buf, 0x00)
-	packetID := byte(0x02)
+
 	packetLen := len([]byte(uuid)) + len([]byte(username)) + 2
-	packet := []byte{byte(packetLen)}
-	packet = append(packet, packetID)
-	packet = append(packet, []byte(uuid)...)
-	packet = append(packet, []byte(username)...)
+
+	var buffer bytes.Buffer
+	WriteVarInt(&buffer, packetLen)
+	WriteVarInt(&buffer, 0)
+
+	fmt.Println("Packetlen", packetLen)
+	fmt.Println(buffer.Bytes())
+
+	// packet := []byte()
+	// buffer.Write([]byte())
+	buffer.Write([]byte(uuid))
+	buffer.Write([]byte(username))
+	// packet = append(packet, packetID)
+	// packet = append(packet, []byte(uuid)...)
+	// packet = append(packet, []byte(username)...)
 	// packet = append(packet, buf...)
 
-	_, err := writer.Write(packet)
+	fmt.Println("package we are sending", buffer.Bytes())
+	_, err := writer.Write(buffer.Bytes())
 	if err != nil {
 		fmt.Println("Error sending login success packet:", err)
 		return
@@ -162,39 +206,6 @@ func sendLoginSuccess(conn net.Conn, uuid string, username string) {
 		return
 	}
 	fmt.Println("Login success packet sent")
-}
-
-func ReadVarString(reader *bufio.Reader) (string, error) {
-	length, err := binary.ReadUvarint(reader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read string length: %v", err)
-	}
-
-	buf := make([]byte, length)
-	_, err = reader.Read(buf)
-	if err != nil {
-		return "", fmt.Errorf("failed to read string data: %v", err)
-	}
-
-	return string(buf), nil
-}
-
-func ReadUUID(reader *bufio.Reader) (string, error) {
-	uuidBytes := make([]byte, 16)
-	_, err := io.ReadFull(reader, uuidBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to read UUID: %v", err)
-	}
-
-	// Format UUID with dashes
-	uuid := fmt.Sprintf("%x-%x-%x-%x-%x",
-		uuidBytes[0:4],
-		uuidBytes[4:6],
-		uuidBytes[6:8],
-		uuidBytes[8:10],
-		uuidBytes[10:16])
-
-	return uuid, nil
 }
 
 func handleReadError(err error) {
