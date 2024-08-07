@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
+	"strings"
 )
 
 func ReadVarString(reader *bufio.Reader) (string, error) {
@@ -41,43 +44,6 @@ func ReadUUID(reader *bufio.Reader) (string, error) {
 	return uuid, nil
 }
 
-func EncodeStringWithVarInt(s string) ([]byte, error) {
-	// Get the string representation of the struct
-
-	// Calculate the number of UTF-16 code units
-	// utf16Length := CalculateUTF16Length(str)
-	// if utf16Length > MaxUTF16Units {
-	// 	return nil, fmt.Errorf("string exceeds maximum length in UTF-16 code units: %d", utf16Length)
-	// }
-
-	// Calculate the number of UTF-8 bytes
-	utf8Length := len([]byte(s))
-	// if utf8Length > MaxUTF16Units*3 {
-	// 	return nil, fmt.Errorf("string exceeds maximum byte length: %d", utf8Length)
-	// }
-
-	// Create a buffer to write the VarInt and UTF-8 string
-	var buffer bytes.Buffer
-
-	// Write the length as a VarInt
-	lenBytes := VarInt(int64(utf8Length))
-	buffer.Write(lenBytes)
-
-	// Write the UTF-8 string bytes
-	buffer.WriteString(s)
-
-	return buffer.Bytes(), nil
-}
-
-
-func VarInt(number int64) []byte {
-	buf := make([]byte, binary.MaxVarintLen64)
-	size := binary.PutVarint(buf, number)
-
-	return buf[:size]
-}
-
-
 func WriteVarInt(buffer *bytes.Buffer, value int) {
 	for {
 		temp := byte(value & 0x7F)
@@ -90,4 +56,37 @@ func WriteVarInt(buffer *bytes.Buffer, value int) {
 			break
 		}
 	}
+}
+
+func ConvertUUID(uuid string) (*big.Int, error) {
+	cleanUUID := strings.ReplaceAll(uuid, "-", "")
+
+	intValue, success := new(big.Int).SetString(cleanUUID, 16)
+	if !success {
+		return nil, fmt.Errorf("error converting UUID to integer")
+	}
+
+	return intValue, nil
+}
+
+func readConfig(r *bufio.Reader) {
+	packetLen, packetID, err := readMetadata(r)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println(packetLen, packetID)
+
+}
+
+func readNBT(r *bufio.Reader, input interface{}) (error) {
+
+	decoder := json.NewDecoder(r)
+
+	err := decoder.Decode(input)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

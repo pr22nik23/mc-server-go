@@ -43,9 +43,6 @@ func handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 	fmt.Println("New connection from", conn.RemoteAddr())
-	// buf := make([]byte, 1024)
-	// reader.Read(buf)
-	// fmt.Println("This is hte one", buf)
 	packetLen, packetID, err := readMetadata(reader)
 	switch {
 	case errors.Is(err, io.EOF):
@@ -79,7 +76,7 @@ func handleConnection(conn net.Conn) {
 		}
 
 		if nextState == 2 {
-			handleLogin(reader)
+			readMetadata(reader)
 			username, err := ReadVarString(reader)
 			if err != nil {
 				fmt.Println("Error", err)
@@ -93,10 +90,14 @@ func handleConnection(conn net.Conn) {
 			fmt.Println("UUID", uuid)
 
 			sendLoginSuccess(conn, uuid, username)
-			handleLogin(reader)
-
+			readMetadata(reader)
+			sendConf()
+			buf := make([]byte, 1024)
+			reader.Read(buf)
+			fmt.Println("newBuf", buf)
+			fmt.Println("newBuf", string(buf))
 		} else if nextState == 1 {
-			handleLogin(reader)
+			readMetadata(reader)
 
 			SendStatusResponse(conn)
 
@@ -115,13 +116,10 @@ func handleConnection(conn net.Conn) {
 
 func readReportDetails(reader *bufio.Reader) {
 	buf := make([]byte, 255)
-	read, err := reader.Read(buf)
+	_, err := reader.Read(buf)
 	if err != nil {
 		fmt.Println("DSADSADSA", err)
 	}
-	fmt.Println("Read bytes", read)
-	fmt.Println(buf)
-	fmt.Println(string(buf))
 	count, err := binary.ReadVarint(reader)
 	if err != nil {
 		fmt.Println("Read Error", err)
@@ -157,45 +155,26 @@ func readMetadata(reader *bufio.Reader) (uint64, uint64, error) {
 	return packetLength, packetID, nil
 }
 
-func handleLogin(reader *bufio.Reader) {
-	length, err := binary.ReadUvarint(reader)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("length", length)
-
-	packet_id, err := binary.ReadUvarint(reader)
-	if err != nil {
-		fmt.Println("err", err)
-	}
-
-	fmt.Println("new packet id", packet_id)
-}
-
 func sendLoginSuccess(conn net.Conn, uuid string, username string) {
 	writer := bufio.NewWriter(conn)
 
-	packetLen := len([]byte(uuid)) + len([]byte(username)) + 2
+	converted, err := ConvertUUID(uuid)
+	if err != nil {
+		fmt.Println(err)
+	}
+	packetLen := len(converted.Bytes()) + len([]byte(username)) + 4
 
 	var buffer bytes.Buffer
 	WriteVarInt(&buffer, packetLen)
-	WriteVarInt(&buffer, 0)
+	WriteVarInt(&buffer, 0x02)
 
-	fmt.Println("Packetlen", packetLen)
-	fmt.Println(buffer.Bytes())
-
-	// packet := []byte()
-	// buffer.Write([]byte())
-	buffer.Write([]byte(uuid))
+	buffer.Write([]byte(converted.Bytes()))
+	WriteVarInt(&buffer, len(username))
 	buffer.Write([]byte(username))
-	// packet = append(packet, packetID)
-	// packet = append(packet, []byte(uuid)...)
-	// packet = append(packet, []byte(username)...)
-	// packet = append(packet, buf...)
+	WriteVarInt(&buffer, 0x00)
+	WriteVarInt(&buffer, 0x00)
 
-	fmt.Println("package we are sending", buffer.Bytes())
-	_, err := writer.Write(buffer.Bytes())
+	_, err = writer.Write(buffer.Bytes())
 	if err != nil {
 		fmt.Println("Error sending login success packet:", err)
 		return
@@ -208,13 +187,35 @@ func sendLoginSuccess(conn net.Conn, uuid string, username string) {
 	fmt.Println("Login success packet sent")
 }
 
-func handleReadError(err error) {
-	switch {
-	case errors.Is(err, io.EOF):
-		fmt.Println("No bytes were read:", err)
-	case errors.Is(err, io.ErrUnexpectedEOF):
-		fmt.Println("Unexpected EOF:", err)
-	default:
-		fmt.Println("Error:", err)
+func sendConf() {
+	var buffer bytes.Buffer
+	locale := "en_us"
+	viewDistance := 0xA
+	chatMode := 0   // 0 - enabled, 1 - commands only, 2 - hidden
+	chatColors := 1 //Boolean  0 -false 1 -true
+	mainHand := 1   // 0-left, 1-right
+	var skinParts byte = 255
+	WriteVarInt(&buffer, 0x00)
+
+	packetlen := len(locale) + 7
+	WriteVarInt(&buffer, packetlen)
+
+	WriteVarInt(&buffer, len([]byte(locale)))
+	buffer.Write([]byte(locale))
+
+	err := binary.Write(&buffer, binary.BigEndian, byte(viewDistance))
+	if err != nil {
+		fmt.Println("Error writing viewDistance:", err)
+		return
 	}
+
+	WriteVarInt(&buffer, chatMode)
+	WriteVarInt(&buffer, chatColors)
+	buffer.WriteByte(skinParts)
+	WriteVarInt(&buffer, mainHand)
+	//enable text filtering
+	WriteVarInt(&buffer, 1)
+	//allow server lsiting
+	WriteVarInt(&buffer, 1)
+	fmt.Println("Packet sent successfully CONFING")
 }

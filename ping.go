@@ -2,15 +2,17 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
+
 	"github.com/gofrs/uuid/v5"
 )
 
 func SendStatusResponse(conn net.Conn) {
 	writer := bufio.NewWriter(conn)
-	packetID := byte(0x00)
+	var buffer bytes.Buffer
 
 	uuid, err := uuid.NewV4()
 	if err != nil {
@@ -45,21 +47,16 @@ func SendStatusResponse(conn net.Conn) {
 		return
 	}
 
-	varString, err := EncodeStringWithVarInt(string(res))
-	if err != nil {
-		fmt.Println(err)
-	}
-	packetLength := 3 + len(varString)
-	packetLengthVarInt := VarInt(int64(packetLength))
+	packetLength := len(res) + 3
 
-	// Construct the final packet.
-	packet := append(packetLengthVarInt, packetID)
-	packet = append(packet, varString...)
+	WriteVarInt(&buffer, packetLength)
+	WriteVarInt(&buffer, 0x00)
+	WriteVarInt(&buffer, len(res))
+	fmt.Println("packet Len ", packetLength)
+	fmt.Println("Actual packet len", len(buffer.Bytes()))
+	buffer.Write(res)
 
-	fmt.Println("Packet len", len(packet))
-	fmt.Println("Written packet len", packetLength)
-	// Write the packet to the connection.
-	_, err = writer.Write(packet)
+	_, err = writer.Write(buffer.Bytes())
 	if err != nil {
 		fmt.Println("Error sending status response packet:", err)
 		return
