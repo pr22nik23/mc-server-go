@@ -10,9 +10,6 @@ import (
 	"net"
 )
 
-type Server struct {
-}
-
 const (
 	port = ":25565"
 )
@@ -90,12 +87,28 @@ func handleConnection(conn net.Conn) {
 			fmt.Println("UUID", uuid)
 
 			sendLoginSuccess(conn, uuid, username)
-			readMetadata(reader)
-			sendConf()
-			buf := make([]byte, 1024)
+			//packet 3
+			packetLen, packetID, err := readMetadata(reader)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println("Len", packetLen, "packetID", packetID)
+			packetLen, packetID, err = readMetadata(reader)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println(packetLen, packetID)
+			buf := make([]byte, 100)
 			reader.Read(buf)
 			fmt.Println("newBuf", buf)
-			fmt.Println("newBuf", string(buf))
+			sendConf(conn)
+
+			readConfig(reader)
+	
+			sendConfConfirmation(conn)
+			buf = make([]byte, 100)
+			reader.Read(buf)
+			fmt.Println("newBuf", buf)
 		} else if nextState == 1 {
 			readMetadata(reader)
 
@@ -187,35 +200,84 @@ func sendLoginSuccess(conn net.Conn, uuid string, username string) {
 	fmt.Println("Login success packet sent")
 }
 
-func sendConf() {
+func sendConf(conn net.Conn) {
+
+	writer := bufio.NewWriter(conn)
+
 	var buffer bytes.Buffer
-	locale := "en_us"
-	viewDistance := 0xA
-	chatMode := 0   // 0 - enabled, 1 - commands only, 2 - hidden
-	chatColors := 1 //Boolean  0 -false 1 -true
-	mainHand := 1   // 0-left, 1-right
-	var skinParts byte = 255
-	WriteVarInt(&buffer, 0x00)
+	id := 0x0E
+	packCount := 1
+	nameSpace := "minecraft"
+	nameSpaceID := "core"
+	version := "1.21"
 
-	packetlen := len(locale) + 7
-	WriteVarInt(&buffer, packetlen)
+	packetLen := len(nameSpace) + len(nameSpaceID) + len(version) + 5
 
-	WriteVarInt(&buffer, len([]byte(locale)))
-	buffer.Write([]byte(locale))
+	WriteVarInt(&buffer, packetLen)
+	WriteVarInt(&buffer, id)
 
-	err := binary.Write(&buffer, binary.BigEndian, byte(viewDistance))
+	WriteVarInt(&buffer, packCount)
+	WriteVarInt(&buffer, len(nameSpace))
+	buffer.Write([]byte(nameSpace))
+
+	WriteVarInt(&buffer, len(nameSpaceID))
+	buffer.Write([]byte(nameSpaceID))
+
+	WriteVarInt(&buffer, len(version))
+	buffer.Write([]byte(version))
+
+	fmt.Println("Packetlen", packetLen)
+	fmt.Println("Packetlen SENT", len(buffer.Bytes()))
+
+	fmt.Println("BUFFFFFFFER", buffer.Bytes())
+
+	_, err := writer.Write(buffer.Bytes())
 	if err != nil {
-		fmt.Println("Error writing viewDistance:", err)
+		fmt.Println("Error sending config packet:", err)
+		return
+	}
+	err = writer.Flush()
+	if err != nil {
+		fmt.Println("Error flushing writer:", err)
 		return
 	}
 
-	WriteVarInt(&buffer, chatMode)
-	WriteVarInt(&buffer, chatColors)
-	buffer.WriteByte(skinParts)
-	WriteVarInt(&buffer, mainHand)
-	//enable text filtering
-	WriteVarInt(&buffer, 1)
-	//allow server lsiting
-	WriteVarInt(&buffer, 1)
-	fmt.Println("Packet sent successfully CONFING")
+	fmt.Println("Packet sent confing")
 }
+
+func sendConfConfirmation(conn net.Conn) {
+	writer := bufio.NewWriter(conn)
+
+	var buffer bytes.Buffer
+	WriteVarInt(&buffer, 0x01)
+	WriteVarInt(&buffer, 0x03)
+
+	_, err := writer.Write(buffer.Bytes())
+	if err != nil {
+		fmt.Println("Error sending config packet:", err)
+		return
+	}
+	err = writer.Flush()
+	if err != nil {
+		fmt.Println("Error flushing writer:", err)
+		return
+	}
+
+	fmt.Println("Packet confirmation sent")
+}
+
+
+
+
+// func login(conn net.Conn) {
+
+// 	var buffer bytes.Buffer
+// 	writer := bufio.NewWriter(conn)
+
+// 	entityID := 1
+// 	isHardCore := 0
+
+// 	buffer.WriteByte(byte(entityID))
+// 	err := binary.Write(&buffer, binary.BigEndian, entityID)
+
+// }

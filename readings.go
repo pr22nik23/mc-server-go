@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -69,17 +70,7 @@ func ConvertUUID(uuid string) (*big.Int, error) {
 	return intValue, nil
 }
 
-func readConfig(r *bufio.Reader) {
-	packetLen, packetID, err := readMetadata(r)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println(packetLen, packetID)
-
-}
-
-func readNBT(r *bufio.Reader, input interface{}) (error) {
+func readNBT(r *bufio.Reader, input interface{}) error {
 
 	decoder := json.NewDecoder(r)
 
@@ -89,4 +80,55 @@ func readNBT(r *bufio.Reader, input interface{}) (error) {
 	}
 
 	return nil
+}
+
+func readConfig(reader *bufio.Reader) {
+
+	_, packetID, err := readMetadata(reader)
+	if err == io.EOF {
+		if errors.Is(err, io.EOF) {
+			fmt.Println(err)
+			return
+		}
+	}
+
+	if packetID == 7 {
+		count, err := binary.ReadUvarint(reader)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		namespace, err := ReadVarString(reader)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		ID, err := ReadVarString(reader)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		version, err := ReadVarString(reader)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Println("Count", count)
+		fmt.Println("Namespace", namespace)
+		fmt.Println("ID", ID)
+		fmt.Println("Version", version)
+
+	} else {
+		packetLen, packetID, err := readMetadata(reader)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		buf := make([]byte, packetLen)
+		reader.Read(buf)
+
+		fmt.Printf("Optional Buffer{ ID: %d, Buffer: %v}", packetID, buf)
+
+		readConfig(reader)
+	}
 }
